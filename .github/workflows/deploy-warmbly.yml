@@ -1,0 +1,114 @@
+name: Build & Deploy Warmbly Web
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/deploy-warmbly.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: warmbly-web-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/warmbly-web
+
+jobs:
+  build:
+    name: Build & Push Custom Web Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: meta
+        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          file: ./web/Dockerfile
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=warmbly-web
+          cache-to: type=gha,mode=max,scope=warmbly-web
+
+  deploy:
+    name: Deploy to harsh-n1
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+          sudo dpkg -i cloudflared.deb
+          rm -f cloudflared.deb
+
+      - name: Rollout update to Docker on harsh-n1
+        env:
+          SSH_KEY: ${{ secrets.HARSH_N1_SSH_KEY }}
+          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          cat <<'SSHEOF' > ~/.ssh/config
+          Host harsh-n1
+              HostName ssh-n1.greenhacker.in
+              User harsh
+              IdentityFile ~/.ssh/id_ed25519
+              ProxyCommand cloudflared access ssh --hostname %h
+              StrictHostKeyChecking no
+              ConnectTimeout 20
+          SSHEOF
+
+          echo "🔑 Logging into GHCR and pulling image on harsh-n1..."
+          ssh harsh-n1 "
+            set -e
+            echo '${GH_TOKEN}' | docker login ghcr.io -u '${GH_ACTOR}' --password-stdin
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG} warmbly-web:custom
+            cd /home/harsh/stack/warmbly
+            docker compose up -d --force-recreate web
+            docker image prune -f
+          "
+
+          echo "🔍 Post-deployment sanity health check..."
+          ssh harsh-n1 "curl -fsS -H 'Host: outreach.greenhacker.in' http://localhost:80/app/emails >/dev/null && echo '✅ Live outreach dashboard check passed!'"
+
+          echo "🎉 Warmbly web successfully deployed and live at https://outreach.greenhacker.in"
