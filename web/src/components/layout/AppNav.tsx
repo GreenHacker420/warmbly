@@ -1,11 +1,3 @@
-// Sidebar for the sky-chrome shell.
-//
-// Brae-density structure: small tracked-uppercase section labels, h-8
-// nav rows, hairline dividers between sections. The header slot is
-// the LivePanel — a small ambient telemetry card that replaces the
-// generic "+ New Campaign" pill. Cold-email work is always-on; the
-// sidebar should reflect that rather than nag with a CTA.
-
 import { Link, useLocation } from "@tanstack/react-router";
 import {
     ClipboardListIcon,
@@ -991,13 +983,9 @@ function LivePanel({ collapsed = false }: { collapsed?: boolean }) {
     const pct = capacity > 0 ? Math.min(100, (sentToday / capacity) * 100) : 0;
 
     // Collapsed rail: the panel keeps the two things it is actually for —
-    // today's volume and how much of the day's capacity it used — and drops
-    // the sparkline and the chips, which need the label column to be readable.
+    // today's volume and the sparkline.
     if (collapsed) {
-        const summary =
-            capacity > 0
-                ? `${sentToday.toLocaleString()} of ${capacity.toLocaleString()} sent today`
-                : `${sentToday.toLocaleString()} sent today`;
+        const summary = `${sentToday.toLocaleString()} sent today`;
         return (
             <Tooltip>
                 <TooltipTrigger asChild>
@@ -1008,12 +996,6 @@ function LivePanel({ collapsed = false }: { collapsed?: boolean }) {
                         <span className="sr-only">Analytics · {summary}</span>
                         <span aria-hidden className="text-[10px] font-semibold leading-none tabular-nums text-slate-900">
                             {compactN(sentToday)}
-                        </span>
-                        <span aria-hidden className="h-1 w-full overflow-hidden rounded-full bg-sky-100">
-                            <span
-                                className="block h-full rounded-full bg-sky-500 transition-[width] duration-700 ease-out"
-                                style={{ width: `${pct}%` }}
-                            />
                         </span>
                     </Link>
                 </TooltipTrigger>
@@ -1048,30 +1030,10 @@ function LivePanel({ collapsed = false }: { collapsed?: boolean }) {
                             className="text-[19px] font-semibold text-slate-900 leading-none"
                         />
                         <span className="text-[10.5px] text-slate-500">
-                            {capacity > 0
-                                ? `of ${capacity.toLocaleString()} sent today`
-                                : "sent today"}
+                            sent today
                         </span>
                     </>
                 )}
-            </div>
-
-            {/* Capacity meter: same-ramp track so the unfilled part still reads
-                as "room left today", not as a broken bar. */}
-            <div
-                className="mt-1.5 px-2.5"
-                title={
-                    capacity > 0
-                        ? `${sentToday} of ${capacity} daily capacity used`
-                        : "Connect a mailbox to start sending"
-                }
-            >
-                <div className="h-1 rounded-full bg-sky-100 overflow-hidden">
-                    <div
-                        className="h-full rounded-full bg-sky-500 transition-[width] duration-700 ease-out"
-                        style={{ width: `${pct}%` }}
-                    />
-                </div>
             </div>
 
             <Sparkline points={trend} hovered={hovered} onHover={setHovered} />
