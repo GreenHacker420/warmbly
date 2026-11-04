@@ -7,18 +7,15 @@ import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "@/hooks/useSearchParams";
 import toast from "react-hot-toast/headless";
-import UpgradeDialog from "@/components/layout/UpgradeDialog";
 import { UpgradeDialogContext, type UpgradeRequest } from "./context/upgrade";
 
 export default function UpgradeDialogProvider({ children }: { children: React.ReactNode }) {
     const [request, setRequest] = React.useState<UpgradeRequest | null>(null);
     const [visible, setVisible] = React.useState(false);
 
-    const open = React.useCallback((req: UpgradeRequest) => {
-        setRequest(req);
-        setVisible(true);
+    const open = React.useCallback((_req: UpgradeRequest) => {
+        // Unlocked: upgrade dialog disabled
     }, []);
-    // The request is kept while the exit animation plays out.
     const close = React.useCallback(() => setVisible(false), []);
 
     useCheckoutReturn();
@@ -28,7 +25,6 @@ export default function UpgradeDialogProvider({ children }: { children: React.Re
     return (
         <UpgradeDialogContext.Provider value={value}>
             {children}
-            {request && <UpgradeDialog open={visible} request={request} onClose={close} />}
         </UpgradeDialogContext.Provider>
     );
 }

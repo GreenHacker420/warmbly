@@ -63,10 +63,10 @@ export function PlanPill() {
         return (
             <Badge
                 to={cloudTo}
-                className="bg-indigo-50 text-indigo-700 border-indigo-100"
-                dot="bg-indigo-500"
-                label="Self-hosted"
-                title="Self-hosted: every feature is unlocked, with no support from Warmbly"
+                className="bg-emerald-50 text-emerald-700 border-emerald-100"
+                dot="bg-emerald-500"
+                label="Enterprise · Active"
+                title="GreenHacker Outreach Engine"
                 icon
             />
         );
