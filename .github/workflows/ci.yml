@@ -70,8 +70,10 @@ jobs:
             aws-deployment:
               - '.github/workflows/ci.yml'
               - '.github/workflows/deploy-aws.yml'
+              - '.github/workflows/configure-backend-aws.yml'
               - '.github/workflows/rotate-keys.yml'
               - '.github/scripts/aws-deploy*.cjs'
+              - '.github/scripts/aws-backend-config*.cjs'
               - '.github/scripts/aws-rotate*.cjs'
               - '.github/aws-deploy/**'
               - 'deploy/terraform/aws/runtime/rotate/**'
@@ -265,6 +267,18 @@ jobs:
           grep -q '^--- PASS: TestLiveCampaignLoadingLogsKeepHistoryWithoutCustomerAlerts ' campaign-reconnect.log
           if grep -q -- '--- SKIP:' campaign-reconnect.log; then exit 1; fi
 
+      - name: Mailbox push channels and fleet usage (PostgreSQL)
+        if: matrix.suite == 'live-1'
+        env:
+          WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
+        run: |
+          set -o pipefail
+          go test -race -v -p 1 ./internal/repository ./internal/app/fleetmetrics -run '^TestLive(MailboxPushChannelsRoundTripAndScopeToTheOwner|WakeTargetsSkipWorkersThatCannotActOnAWake|ReadTakesMemoryFromHeartbeats)$' -count=1 | tee mailbox-push.log
+          for test in TestLiveMailboxPushChannelsRoundTripAndScopeToTheOwner TestLiveWakeTargetsSkipWorkersThatCannotActOnAWake TestLiveReadTakesMemoryFromHeartbeats; do
+            grep -q -- "--- PASS: $test " mailbox-push.log
+          done
+          if grep -q -- '--- SKIP:' mailbox-push.log; then exit 1; fi
+
       - name: Contact campaign empty-step regression (PostgreSQL)
         if: matrix.suite == 'live-1'
         env:
@@ -289,6 +303,13 @@ jobs:
           WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
         run: |
           go test -race -p 1 ./internal/repository ./internal/scheduler ./internal/tasks -run '^TestLive(MailboxSendClaim(AdmitsOnePerGap|WaitsOutAReservedSend)|BookedSendsLeaveOutCampaignWakeups|ParkedCampaignDoesNotThrottleItsPoolMate|BookedSendsStillSpaceTheCampaign|ClaimedMailboxIsPassedOver|CampaignsSharingAMailboxSendOncePerGap|LostMailboxClaimReschedulesWithoutSending)$' -count=1
+
+      - name: Postgres queue claim regressions (PostgreSQL)
+        if: matrix.suite == 'live-3'
+        env:
+          WARMBLY_TEST_DB: postgres://warmbly:warmbly@127.0.0.1:5432/warmbly_test?sslmode=disable
+        run: |
+          go test -race -p 1 ./internal/repository -run '^TestLive(ConcurrentDispatchersNeverClaimTheSameTask|SendResultEffectsBatchClaimsDeliverEachEffectOnce|CRMClaimTakesDueAndLapsedJobsOnce)$' -count=1
 
       - name: Invited signup atomic provisioning regressions (PostgreSQL)
         if: matrix.suite == 'live-1'
@@ -1089,7 +1110,7 @@ jobs:
       - name: Check deploy, rollback and rotation gates
         env:
           NODE_PATH: ${{ github.workspace }}/.github/aws-deploy/node_modules
-        run: node --test .github/scripts/aws-deploy.test.cjs .github/scripts/aws-rotate.test.cjs deploy/terraform/aws/runtime/rotate/rotate.test.cjs
+        run: node --test .github/scripts/aws-deploy.test.cjs .github/scripts/aws-backend-config.test.cjs .github/scripts/aws-rotate.test.cjs deploy/terraform/aws/runtime/rotate/rotate.test.cjs
 
   ci-status:
     name: CI Status
