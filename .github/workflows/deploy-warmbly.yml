@@ -20,7 +20,7 @@ env:
 jobs:
   build:
     name: Build & Push Custom Web Image
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     permissions:
       contents: read
       packages: write
@@ -64,7 +64,7 @@ jobs:
   deploy:
     name: Deploy to harsh-n1
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux]
     permissions:
       contents: read
       packages: read
@@ -86,32 +86,44 @@ jobs:
           GH_ACTOR: ${{ github.actor }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-
-          cat <<'SSHEOF' > ~/.ssh/config
-          Host harsh-n1
-              HostName ssh-n1.greenhacker.in
-              User harsh
-              IdentityFile ~/.ssh/id_ed25519
-              ProxyCommand cloudflared access ssh --hostname %h
-              StrictHostKeyChecking no
-              ConnectTimeout 20
-          SSHEOF
-
-          echo "🔑 Logging into GHCR and pulling image on harsh-n1..."
-          ssh harsh-n1 "
-            set -e
-            echo '${GH_TOKEN}' | docker login ghcr.io -u '${GH_ACTOR}' --password-stdin
+          if [ "$(hostname)" = "harsh-n1" ]; then
+            echo "⚡ Running rollout directly on local harsh-n1 host..."
+            echo "${GH_TOKEN}" | docker login ghcr.io -u "${GH_ACTOR}" --password-stdin
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
             docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG} warmbly-web:custom
             cd /home/harsh/stack/warmbly
             docker compose up -d --force-recreate web
             docker image prune -f
-          "
+            echo "🔍 Post-deployment sanity health check..."
+            curl -fsS -H 'Host: outreach.greenhacker.in' http://localhost:80/app/emails >/dev/null && echo '✅ Live outreach dashboard check passed!'
+          else
+            mkdir -p ~/.ssh
+            echo "$SSH_KEY" > ~/.ssh/id_ed25519
+            chmod 600 ~/.ssh/id_ed25519
 
-          echo "🔍 Post-deployment sanity health check..."
-          ssh harsh-n1 "curl -fsS -H 'Host: outreach.greenhacker.in' http://localhost:80/app/emails >/dev/null && echo '✅ Live outreach dashboard check passed!'"
+            cat <<'SSHEOF' > ~/.ssh/config
+            Host harsh-n1
+                HostName ssh-n1.greenhacker.in
+                User harsh
+                IdentityFile ~/.ssh/id_ed25519
+                ProxyCommand cloudflared access ssh --hostname %h
+                StrictHostKeyChecking no
+                ConnectTimeout 20
+            SSHEOF
+
+            echo "🔑 Logging into GHCR and pulling image on harsh-n1..."
+            ssh harsh-n1 "
+              set -e
+              echo '${GH_TOKEN}' | docker login ghcr.io -u '${GH_ACTOR}' --password-stdin
+              docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}
+              docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG} warmbly-web:custom
+              cd /home/harsh/stack/warmbly
+              docker compose up -d --force-recreate web
+              docker image prune -f
+            "
+
+            echo "🔍 Post-deployment sanity health check..."
+            ssh harsh-n1 "curl -fsS -H 'Host: outreach.greenhacker.in' http://localhost:80/app/emails >/dev/null && echo '✅ Live outreach dashboard check passed!'"
+          fi
 
           echo "🎉 Warmbly web successfully deployed and live at https://outreach.greenhacker.in"
