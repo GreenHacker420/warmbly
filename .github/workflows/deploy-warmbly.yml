@@ -15,7 +15,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/warmbly-web
+  IMAGE_NAME: ${{ github.repository_owner == 'GreenHacker420' && 'greenhacker420' || github.repository_owner }}/warmbly-web
 
 jobs:
   build:
@@ -65,6 +65,9 @@ jobs:
     name: Deploy to harsh-n1
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout repository

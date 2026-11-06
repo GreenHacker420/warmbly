@@ -20,7 +20,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/warmbly
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner == 'GreenHacker420' && 'greenhacker420' || github.repository_owner }}/warmbly
 
 jobs:
   validate-tag:
