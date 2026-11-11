@@ -92,6 +92,8 @@ The mapping menu lists the custom fields your workspace already has under **Your
 
 A column whose header names an existing field is mapped to it before you open the menu. The match ignores case, spaces, underscores, dashes and dots, so a `company url` column lands on your `company_url` field in its stored spelling instead of starting a second field. Only one column is matched to each field, and standard fields (Email, Company, and so on) are matched first.
 
+Columns that say where a contact is are kept too, even when no field exists for them yet: `Country`, `Country/Region`, `State`, `State/Province`, `Region`, `City`, `Location`, `Time Zone` and their company versions (`Company Country` and so on) are mapped to custom fields (`country`, `state`, `region`, `city`, `location`, `timezone`) instead of being skipped. Warmbly reads them to place each contact for [region segments and local-time sending](/guides/regions-and-timezones/).
+
 When the instance has TypeSafe configured, the columns no header matched are also placed by what their header means: `Job Title` onto your `Title` field, `Firmenname` onto Company, `Sector` onto `Industry`. Only a confident answer is applied, each field still goes to one column, and those rows are marked **Matched by meaning. Check it.** until you change them. It picks names, Company, Phone and your custom fields only: Subscribed and Labels change who gets mail and which labels exist, so they are never guessed. What is sent is the column headers, the kind of value each column holds and your field names, never a cell, and nothing at all unless the first row is clearly headers (no address, date or number in it, and a named Email column); see [data control](/development/data-control/#typesafe-judgments). A column of addresses under any header, or none, is mapped to Email either way.
 
 Each custom mapping says what it will do: **Fills your existing field**, **Creates a new field**, or, when the name you typed differs from an existing field only in case or separators, **You already have `Industry`**, with **Use it** to switch to that field. **Keep N more as custom fields** uses the same matching, so the columns it claims land on your existing fields where it can.
@@ -218,7 +220,7 @@ When more contacts match than are loaded, a bar appears under the header: **Sele
 
 The set is the one the list is showing: search, filters, the subscription facet, and the campaign or segment the list is scoped to all narrow it. Changing any of them clears the selection, because it would no longer mean what it did when you made it. A selection past `250,000` contacts is refused rather than half-applied; add a filter and work through it in parts.
 
-Every bulk action reads the selection: **Edit**, **Segment**, **Remove from segment**, **Remove from campaign**, **Research**, **Verify**, **Mark deliverable** and **Delete**. **Push to CRM** and **Research** are the exceptions: a push calls the CRM once per contact while you wait, and each research run spends AI credits, so both stay capped at `500` at a time. A workspace in [HubSpot mode](/guides/hubspot/) or [Pipedrive mode](/guides/pipedrive/) does not need **Push to CRM** for that CRM: a contact is created there the first time Warmbly emails it.
+Every bulk action reads the selection: **Edit**, **Segment**, **Remove from segment**, **Remove from campaign**, **Research**, **Verify**, **Mark deliverable** and **Delete**. **Push to CRM** and **Research** are the exceptions: a push calls the CRM once per contact while you wait, and each research run is charged to the workspace balance, so both stay capped at `500` at a time. A workspace in [HubSpot mode](/guides/hubspot/) or [Pipedrive mode](/guides/pipedrive/) does not need **Push to CRM** for that CRM: a contact is created there the first time Warmbly emails it.
 
 **Select all matching** is in the **From contacts** picker too, on a campaign's Leads tab and a segment page, so a whole search can be added as leads or members in one step.
 
@@ -379,7 +381,7 @@ Before this rule, older mail could open tasks and record reply intents when its 
 
 Automated replies are off deliberately. A vacation notice is not follow-up work, and a week of sending makes enough of them to bury the real replies. Tick **Automated** if you do want one per machine reply, or untick the human ones you do not need. Unticking everything is the same as turning the switch off.
 
-The classification does more than decide the task: an automated reply never counts as a reply for **stop on reply** or for a **replied** branch in a sequence, and its notification goes to the **Out-of-office detected** preference rather than **New reply**, so muting one does not mute the other.
+The classification does more than decide the task: an automated reply never counts as a reply for **stop on reply** or for a **replied** branch in a sequence, and its notification goes to the **Out-of-office detected** preference rather than **Positive reply** or **Reply received**, so muting one does not mute the other.
 
 </Fold>
 

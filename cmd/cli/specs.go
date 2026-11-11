@@ -247,6 +247,14 @@ scheduler's own gates, and list every limit that took the number below what the
 mailbox caps add up to. Nothing is sent or written.`,
 			},
 			{
+				Name: "timezones", Aliases: []string{"lead-timezones"}, Short: "Where the campaign's leads are, by timezone",
+				Method: http.MethodGet, Path: "/campaigns/{id}/lead-timezones",
+				Args: []argSpec{{Name: "id", Help: "The campaign's id"}},
+				Long: `Count the campaign's leads by the timezone their records resolve to, with
+the leads nothing places, so a schedule read in each lead's own time can be
+checked before launch. Nothing is sent or written.`,
+			},
+			{
 				Name: "preflight", Short: "Run the pre-send checks without sending",
 				Method: http.MethodPost, Path: "/campaigns/{id}/preflight", Body: bodyOptional,
 				Args: []argSpec{{Name: "id", Help: "The campaign's id"}},
@@ -1587,7 +1595,8 @@ func placementSpec() resource {
 		{Name: "seed", Help: "Only this seed inbox's id, with --panel workspace (repeatable)", Kind: flagStrings, Key: "seed_ids"},
 		{Name: "provider", Help: "Only seeds at this provider, e.g. gmail or outlook (repeatable)", Kind: flagStrings, Key: "families"},
 		{Name: "on-unavailable", Help: "defer (retry a mailbox that cannot send yet, the default) or skip", Key: "on_unavailable"},
-		{Name: "max-credits", Help: "Pay up to this many credits in total for tests past this month's free ones", Kind: flagInt, Key: "max_credits"},
+		{Name: "max-usd", Help: "Pay up to this many dollars in total for tests past this month's free ones", Kind: flagFloat, Key: "max_usd"},
+		{Name: "max-credits", Help: "Older form of --max-usd, counted in credits", Kind: flagInt, Key: "max_credits"},
 	}
 	return resource{
 		Name:    "placement",
@@ -1631,7 +1640,8 @@ mailboxes, a few at a time.`,
 					{Name: "seed", Help: "Only this seed inbox's id, with --panel workspace (repeatable)", Kind: flagStrings, Key: "seed_ids"},
 					{Name: "provider", Help: "Only seeds at this provider, e.g. gmail or outlook (repeatable)", Kind: flagStrings, Key: "families"},
 					{Name: "pace", Help: "spaced (about a minute apart) or quick (a few seconds apart)", Key: "pace"},
-					{Name: "max-credits", Help: "Pay up to this many credits when this month's free tests are used up", Kind: flagInt, Key: "max_credits"},
+					{Name: "max-usd", Help: "Pay up to this many dollars when this month's free tests are used up", Kind: flagFloat, Key: "max_usd"},
+					{Name: "max-credits", Help: "Older form of --max-usd, counted in credits", Kind: flagInt, Key: "max_credits"},
 				},
 				Table: testTable,
 			},

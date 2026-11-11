@@ -79,18 +79,22 @@ func (c *Client) handleError(err error) *errx.MailError {
 		case imap.ResponseCodeLimit:
 			// A server limit (connections, commands per window) is a throttle to back off from.
 			return errx.ErrMailSendingTooFast
-		case imap.ResponseCodeNonExistent:
+		case imap.ResponseCodeNonExistent, imap.ResponseCodeTryCreate:
 			// The folder or message asked for is gone, which the folder walk
 			// recovers from by re-listing. Not a reason to reconnect a mailbox.
+			// Some servers say it with TRYCREATE, RFC 3501's word for a missing target.
 			return errx.ErrMailResourceNotFound
 		case imap.ResponseCodeAlert:
-			if mailErr := c.classifyAlert(imapErr.Text); mailErr != nil {
+			if mailErr := c.classifyAlert(imapErr); mailErr != nil {
 				return mailErr
 			}
 			return errx.ErrMailUnknownImapError(imapErrDetail(imapErr))
 		case "":
 			if imapErr.Type == imap.StatusResponseTypeNo && bareCommandFailure(imapErr.Text) {
 				return errx.ErrMailServerUnreachable
+			}
+			if imapErr.Type == imap.StatusResponseTypeNo && missingMailboxText(imapErr.Text) {
+				return errx.ErrMailResourceNotFound
 			}
 			return errx.ErrMailUnknownImapError(imapErrDetail(imapErr))
 		default:
@@ -146,13 +150,16 @@ func (c *Client) credentialsRefused() *errx.MailError {
 	return errx.ErrMailInvalidCredentials
 }
 
-// Gmail's [ALERT] texts for a throttle and for a sign-in the owner must complete.
+// Gmail's [ALERT] texts for a throttle, and for a refused password or a sign-in the owner must complete.
 var (
-	alertThrottles = []string{
+	// Zoho's, for an account signing in to another region's data centre (imap.zoho.com vs .eu, .in, .com.au).
+	alertWrongServer = "the server details you are using seems incorrect"
+	alertThrottles   = []string{
 		"too many simultaneous connections",
 		"exceeded command or bandwidth limits",
 	}
 	alertLoginRequired = []string{
+		"invalid credentials",
 		"application-specific password required",
 		"log in via your web browser",
 		"web login required",
@@ -160,8 +167,11 @@ var (
 )
 
 // classifyAlert returns nil for an [ALERT] text it does not recognise.
-func (c *Client) classifyAlert(text string) *errx.MailError {
-	lower := strings.ToLower(text)
+func (c *Client) classifyAlert(alert *imap.Error) *errx.MailError {
+	lower := strings.ToLower(alert.Text)
+	if strings.Contains(lower, alertWrongServer) {
+		return errx.ErrMailWrongServer(imapErrDetail(alert))
+	}
 	for _, phrase := range alertThrottles {
 		if strings.Contains(lower, phrase) {
 			return errx.ErrMailSendingTooFast
@@ -173,6 +183,22 @@ func (c *Client) classifyAlert(text string) *errx.MailError {
 		}
 	}
 	return nil
+}
+
+// loginError classifies a sign-in refusal; no folder is involved yet, so a missing-mailbox text there is not a missing folder.
+func (c *Client) loginError(err error) *errx.MailError {
+	mailErr := c.handleError(err)
+	var imapErr *imap.Error
+	if mailErr.Code == errx.MailErrorCodeNotFound && errors.As(err, &imapErr) && imapErr.Code == "" && missingMailboxText(imapErr.Text) {
+		return errx.ErrMailUnknownImapError(imapErrDetail(imapErr))
+	}
+	return mailErr
+}
+
+// missingMailboxText is a codeless NO naming a missing folder, the way older Dovecot says [NONEXISTENT].
+func missingMailboxText(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	return strings.HasPrefix(lower, "mailbox doesn't exist") || strings.HasPrefix(lower, "mailbox does not exist")
 }
 
 // bareCommandFailure is a reasonless "LIST failed" / "UID FETCH failed" (OVH, Zoho); LOGIN stays out.

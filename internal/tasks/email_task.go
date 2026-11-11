@@ -188,13 +188,12 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		return nil
 	}
 
-	// An instance-executed mailbox waits, rather than ending its chain, while its instance is offline or ungranted.
-	if executed, ready, err := s.selfExecutionReady(ctx, account); err != nil {
+	// A legacy mailbox whose credential stayed on its instance ends its chain; handing the credential to Cloud restarts it.
+	if executed, err := s.instanceExecuted(ctx, account.ID); err != nil {
 		return errx.InternalError()
-	} else if executed && !ready {
-		if err := lineage.RescheduleWarmupTask(ctx, taskID, time.Now().Add(5*time.Minute)); err != nil {
-			return errx.InternalError()
-		}
+	} else if executed {
+		_ = s.taskRepo.UpdateTaskStatus(ctx, taskID, "cancelled")
+		executionStatus = "skipped_credential_required"
 		return nil
 	}
 
@@ -359,7 +358,7 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	// STEP 7: Draw content neither mailbox has seen recently; only a database failure retries.
 	if !shouldReply {
 		var contentErr error
-		content, contentErr = s.pickNewWarmupContent(ctx, *account, partner.ID, taskID)
+		content, contentErr = s.pickNewWarmupContent(ctx, *account, partner, taskID)
 		if contentErr != nil {
 			if !errors.Is(contentErr, errWarmupContentUnavailable) {
 				errs.CaptureException(contentErr)
@@ -376,6 +375,15 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 	}
 	if err := lineage.SaveWarmupLineage(ctx, taskID, repository.WarmupLineage{Subject: subject, References: references, ScenarioVersion: content.scenarioVersion, RenderingVersion: content.renderingVersion, MaxTurns: content.maxTurns}); err != nil {
 		return errx.InternalError()
+	}
+
+	// Added after linting: the recipient's opt-in filter tag is the one marker its owner asked for.
+	if tagger, ok := s.warmupRepo.(warmupFilterTagReader); ok {
+		tag, tagErr := tagger.RecipientWarmupFilterTag(ctx, partner.ID)
+		if tagErr != nil {
+			return errx.InternalError()
+		}
+		emailBody, content.bodyHTML = models.AppendWarmupFilterTag(emailBody, content.bodyHTML, tag)
 	}
 
 	// STEP 9: Generate Message-ID
@@ -395,6 +403,8 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		ContentSource:      contentSource,
 		ConversationID:     conversationID,
 		ConversationTurn:   conversationTurn,
+		SequenceID:         content.sequenceID,
+		VariantID:          content.variantID,
 		// The recipient falls back to matching on the subject when the verify
 		// header does not survive delivery (Graph strips it).
 		Subject:   subject,
@@ -419,18 +429,19 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 
 	// STEP 10: Send warmup email to worker via Kafka
 	emailMsg := EmailMessage{
-		From:        account.Email,
-		To:          []string{partner.Email},
-		Subject:     subject,
-		BodyHTML:    "", // Warmup emails are plaintext only
-		BodyPlain:   emailBody,
-		InReplyTo:   inReplyTo,
-		References:  references,
-		ThreadID:    threadID,
-		MessageID:   messageID,
-		IsWarmup:    true,
-		Tracking:    nil, // No tracking for warmup
-		WarmupToken: warmupTokenStr,
+		From:           account.Email,
+		To:             []string{partner.Email},
+		Subject:        subject,
+		BodyHTML:       content.bodyHTML, // only campaign copy carries HTML
+		BodyPlain:      emailBody,
+		UnsubscribeURL: content.unsubscribeURL,
+		InReplyTo:      inReplyTo,
+		References:     references,
+		ThreadID:       threadID,
+		MessageID:      messageID,
+		IsWarmup:       true,
+		Tracking:       content.tracking, // campaign copy keeps its campaign's tracking
+		WarmupToken:    warmupTokenStr,
 	}
 
 	if err := s.validateWarmupPair(ctx, account, partner, poolType, shouldReply); err != nil {
@@ -440,19 +451,10 @@ func (s *tasksService) HandleEmailTask(task *proto.ProcessTask) *errx.Error {
 		return errx.InternalError()
 	}
 	dispatch, ok := s.taskRepo.(repository.WarmupDispatchRepository)
-	if !ok {
+	if !ok || account.WorkerID == nil {
 		return errx.InternalError()
 	}
-	dispatchWorker := uuid.Nil
-	if executed, _, err := s.selfExecutionReady(ctx, account); err != nil {
-		return errx.InternalError()
-	} else if !executed {
-		if account.WorkerID == nil {
-			return errx.InternalError()
-		}
-		dispatchWorker = *account.WorkerID
-	}
-	nonce, err := dispatch.AuthorizeWarmupDispatch(ctx, taskID, account.ID, dispatchWorker)
+	nonce, err := dispatch.AuthorizeWarmupDispatch(ctx, taskID, account.ID, *account.WorkerID)
 	if err != nil {
 		return errx.InternalError()
 	}
@@ -866,10 +868,17 @@ func pickWeightedPartner(candidates []uuid.UUID, sig partnerSignals) uuid.UUID {
 
 	weights := make([]float64, len(candidates))
 	hostTotals := make(map[string]float64)
-	// Normalize only the coverage base; quality and customer rules still change host share.
+	groupHosts := make(map[string]map[string]struct{})
+	// Normalize only the coverage base (equal per provider group, then per host
+	// within it); quality and customer rules still change the shares.
 	for _, id := range candidates {
 		if host := sig.hostsByID[id]; host != "" {
 			hostTotals[host] += 1.0 / float64(1+sig.domainCounts[sig.domainsByID[id]])
+			group := models.WarmupRecipientGroup(host, "")
+			if groupHosts[group] == nil {
+				groupHosts[group] = make(map[string]struct{})
+			}
+			groupHosts[group][host] = struct{}{}
 		}
 	}
 	var total float64
@@ -877,8 +886,9 @@ func pickWeightedPartner(candidates []uuid.UUID, sig partnerSignals) uuid.UUID {
 		domain := sig.domainsByID[id]
 		// Diversity base weight.
 		w := 1.0 / float64(1+sig.domainCounts[domain])
-		if hostTotal := hostTotals[sig.hostsByID[id]]; hostTotal > 0 {
-			w /= hostTotal
+		host := sig.hostsByID[id]
+		if hostTotal := hostTotals[host]; hostTotal > 0 {
+			w /= hostTotal * float64(len(groupHosts[models.WarmupRecipientGroup(host, "")]))
 		}
 
 		// Per-host placement feedback.
@@ -1200,14 +1210,6 @@ func (s *tasksService) replyPartner(ctx context.Context, target uuid.UUID, accou
 	if xerr != nil || partner == nil {
 		return nil
 	}
-	// Two instance-executed mailboxes never pair, in either direction.
-	if executed, _, err := s.selfExecutionReady(ctx, account); err != nil {
-		return nil
-	} else if executed {
-		if partnerExecuted, _, err := s.selfExecutionReady(ctx, partner); err != nil || partnerExecuted {
-			return nil
-		}
-	}
 	// An exclusion is about who this mailbox may mail, so it holds for a reply
 	// too; the thread exists because the other side started it (#501).
 	if rules := s.warmupRoutingRules(ctx, account, poolType); len(rules) > 0 {
@@ -1289,4 +1291,9 @@ func otherPoolType(poolType string) string {
 		return "free"
 	}
 	return "premium"
+}
+
+// warmupFilterTagReader is implemented by the Postgres warmup repository.
+type warmupFilterTagReader interface {
+	RecipientWarmupFilterTag(ctx context.Context, accountID uuid.UUID) (string, error)
 }

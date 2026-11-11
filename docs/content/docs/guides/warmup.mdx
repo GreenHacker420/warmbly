@@ -39,7 +39,7 @@ Pause to stop both sending and receiving warmup mail, or Stop to also turn diagn
 
 ## Good to know
 
-- On Warmbly Cloud, warmup needs a paid plan, and every paid plan warms unlimited mailboxes in the premium pool. A workspace that had the free plan before it closed to new workspaces keeps warming up to 10 mailboxes in the free pool.
+- On Warmbly Cloud, every paid plan warms unlimited mailboxes in the premium pool. A new workspace warms up to 2 mailboxes in the free pool during its 14-day [free trial](/guides/billing/#the-free-trial), and a workspace that had the free plan before it closed to new workspaces keeps warming up to 10 there. Otherwise warmup needs a paid plan.
 - A self-hosted instance warms every mailbox, but only against the other mailboxes on that instance, with no shared pool.
 - New mailboxes start with warmup off. Once on, it starts at `10` emails a day by default and climbs by `+1` a day to a ceiling of `40`.
 - Keep warmup on after campaigns start. A mailbox backing a live campaign drops to at most five warmup messages a day, and the pool replies to more of them.
@@ -53,7 +53,7 @@ Pause to stop both sending and receiving warmup mail, or Stop to also turn diagn
 Warmup sends natural plain-text threads between participating mailboxes. It measures observed placement and bounded actual-message DKIM evidence. It does not establish organic engagement or guarantee reputation improvement or inbox placement.
 
 <Callout type="info" title="Warmup is a paid feature">
-  On Warmbly Cloud a workspace without a paid plan cannot connect mailboxes, and no warmup traffic is scheduled for it; pending warmup activity is skipped rather than sent. A workspace that had the free plan before it closed to new workspaces keeps warming up to 10 mailboxes in the free pool. See [billing](/guides/billing/#without-a-paid-plan).
+  On Warmbly Cloud a workspace with no paid plan, no free trial and no free plan kept from before cannot connect mailboxes, and no warmup traffic is scheduled for it; pending warmup activity is skipped rather than sent. During the 14-day free trial a new workspace warms up to 2 mailboxes in the free pool; when the trial ends, warmup is paused, and choosing a plan resumes it with the ramp where it stopped. A workspace that had the free plan before it closed to new workspaces keeps warming up to 10 mailboxes in the free pool. See [billing](/guides/billing/#without-a-paid-plan).
 </Callout>
 
 </Fold>
@@ -86,6 +86,8 @@ The Warmup tab shows provider failures from the last 24 hours with their reporte
 
 A worker-loading warning appears only for an active, sending-enabled mailbox after repeated loading failures span at least an hour and the latest failure is less than an hour old. It expires when that evidence becomes stale, including on an already-open page, and is hidden when participation is paused or stopped. One historical failed attempt is never displayed indefinitely as an active loading problem. A later provider-confirmed warmup send clears it; synchronization or a dispatched task alone does not prove delivery.
 
+When the provider asks a mailbox to slow down (Microsoft and Google both do this to new mailboxes from time to time), the held-back email is not counted against the day, and warmup carries on at the provider's pace. The Accounts list keeps showing the next send, and the Warmup tab shows a short grey note rather than an error. Nothing needs doing.
+
 "The sending worker has not loaded this mailbox yet" means that attempt did not send. It is not proof of a deliverability hold, a refused sign-in or an IP allowlist problem. Active mailboxes are reloaded automatically; after a worker restarts, it keeps reporting its restart until the backend acknowledges the request to reload its mailboxes.
 
 Persistent loading failures and pending warmup tasks at least an hour past their intended schedule are checked every five minutes and reported to configured operator channels and error tracking. The latter is a dispatch problem, not evidence of rejected credentials. The local dispatcher persists a five-minute retry delay after internal failures so an old failing batch cannot indefinitely block newer tasks. Backoff does not alter the intended send time, clear a safety hold, or bypass provider limits. A send whose preparation was interrupted before it was handed to a worker (for example by a restart) is retired after ten minutes, so it never holds up the mailbox's next warmup email.
@@ -114,6 +116,20 @@ For each new thread, Warmbly picks a conversation neither mailbox has seen in th
 
 The generator refills the AI bank every six hours toward a target of at least 200 threads, rising with demand up to 5,000, in batches of at most 250 and within a default budget of 1,000 a day. Operators can adjust cadence, targets and budgets in the admin content controls; see [generation configuration](/development/warmup-generation/). None of this guarantees inbox placement or reputation improvement.
 
+### Your campaign copy
+
+Once a mailbox has warmed for 7 days, about a quarter of its new warmup threads open with the copy of a campaign it is sending for, so you see how the providers treat the copy your prospects actually get, and the pool's opens and spam rescues happen on that copy. There is nothing to set up or turn on. Nothing about it guarantees inbox placement or a better reputation.
+
+Warmup uses a campaign's opening steps while the campaign is active: the first step, any step that starts its own thread, and each active A/B variant of those. Follow-ups that reply in the lead's thread are not used, since a warmup recipient has no thread with you. Each one is rendered for its warmup recipient exactly as the campaign renders it for a lead: merge fields, spintax, the HTML part (or plain text for a text-only campaign), the mailbox signature, the opt-out line, UTM tags and the campaign's open pixel and links on its tracking domain. The recipient's name comes from their mailbox name and the company from a business address's domain. A step that needs a value that recipient lacks is left for another recipient rather than guessed at. Opens and clicks on warmup mail never count in campaign analytics.
+
+A step is never used when it has AI blocks or form links (written for each lead), uses a custom field or the lead's phone number, calls itself automated or a test, or fails the warmup content checks. Those mailboxes simply warm on ordinary conversations instead.
+
+The copy goes only to pool mailboxes that file warmup mail out of the inbox (the default), whatever the mail host, and never to one that leaves warmup in its inbox. Filed mail is still in that mailbox, so its owner can open it, but it is the provider's filter that sees it on arrival. A recipient is sent a given step once in 30 days, as a prospect would be, and a mailbox sends the same step or variant at most once a day, preferring the one it used longest ago.
+
+The recipient then answers like a prospect: interested, not right now, not a fit, a question about how it would work, an offer of a short call, or already covered. Your mailbox answers that in kind. Each thread draws its own pair from a hand-written set, so threads differ from one another, and no line invents a fact about your copy.
+
+Each email step of a campaign shows its **Warmup placement** under the step's A/B results: the inbox, tabs and spam rates for every arm over the last 30 days, and the inbox rate at Google Workspace and at Microsoft 365. Only business inboxes on those two count toward these rates; copy sent to free Gmail, Outlook.com, Yahoo or a smaller host is not counted. An arm appears once 20 recipients have reported where it landed, and a provider once 10 have, so a handful of early receipts never reads as a rate. `GET /campaigns/:id/warmup-placement` returns the same figures.
+
 </Fold>
 
 <Fold>
@@ -125,7 +141,7 @@ A pool is the set of mailboxes that warm each other. Your mailbox exchanges warm
 | Pool | Who is in it |
 |------|--------------|
 | `premium` | Paid organizations' mailboxes. The default for paid accounts, isolated from lower-trust traffic. |
-| `free` | Mailboxes of workspaces that kept the earlier free plan, and lower-trust mailboxes, kept separate so free traffic does not mix into premium reputation. New workspaces do not join it without a plan. |
+| `free` | Mailboxes of workspaces in their free trial or that kept the earlier free plan, and lower-trust mailboxes, kept separate so free traffic does not mix into premium reputation. Other workspaces without a plan do not join it. |
 
 A mailbox belongs to exactly one pool at a time. When its plan changes the mailbox moves between pools rather than joining a second one, and it takes its warmup standing with it, so a quarantine or block is not cleared by changing tier.
 
@@ -139,7 +155,7 @@ Partner/domain diversity broadens diagnostic coverage. It is not identity rotati
 
 A [placement seed inbox](/guides/placement-tests/#your-own-seed-inboxes) never joins a pool: marking a mailbox as a seed turns its warmup off, and starting warmup on a seed is refused, because a seed that exchanged mail with the pool would stop being a stranger to every sender in it. It never sends campaign mail either.
 
-Self-hosted instances warm only among their own mailboxes. That local warmup works, but it is not effective: providers learn to recognise a few mailboxes that only write to each other, and one instance has nowhere near enough of them. For these pools of thousands of real mailboxes, use a hosted workspace on [app.warmbly.com](https://app.warmbly.com) and move the mailboxes there. Warmbly Cloud no longer links new self-hosted instances; one [linked earlier](/guides/warmbly-cloud/) keeps its enrolled mailboxes in these pools. On an instance that is not linked, the **Mailboxes** page says so in a banner, with **Use Warmbly Cloud** (opens app.warmbly.com) and **Community on Discord**, since Warmbly does not support self-hosted instances.
+Self-hosted instances warm only among their own mailboxes. That local warmup works, but it is not effective: providers learn to recognise a few mailboxes that only write to each other, and one instance has nowhere near enough of them. For these pools of thousands of real mailboxes, use a hosted workspace on [app.warmbly.com](https://app.warmbly.com) and move the mailboxes there. Warmbly Cloud no longer links new self-hosted instances; one [linked earlier](/guides/warmbly-cloud/) keeps its enrolled mailboxes in these pools. On an instance that is not linked, the **Mailboxes** page says so in a banner, with **Upgrade on Warmbly Cloud** and **Community on Discord**, since Warmbly does not support self-hosted instances. **Upgrade on Warmbly Cloud** opens sign-up on app.warmbly.com (an existing account can sign in from the same page) and then the plan chooser. The banner also links to **Settings > Data**, where a [workspace export](/guides/workspace-export-import/) carries the workspace and, with **Include mailbox credentials** on, its mailboxes still connected.
 
 ### Choosing partners
 
@@ -147,7 +163,7 @@ Outside-workspace partners broaden observations; unlinked self-hosted instances 
 
 Within that order, partners are picked by weight rather than at random. Three things move the weight:
 
-- **Host and domain coverage.** Eligible mail hosts start with balanced total weight, so a host with many custom domains does not crowd out a consumer host sharing one domain, such as Gmail. Recently used domains are downweighted within each host; partner no-repeat rules and daily receiving caps still apply. Gmail and Google Workspace are distinct hosts, as are Outlook.com and Microsoft 365.
+- **Provider, host and domain coverage.** Google, Microsoft, Yahoo and other providers each start with an equal share of new threads, whatever number of smaller hosts the pool holds, so a long tail of small hosts cannot crowd out the providers your prospects use. Within a provider, each mail host starts with an equal share, so a host with many custom domains does not crowd out a consumer host sharing one domain, such as Gmail. Recently used domains are downweighted within each host; partner no-repeat rules and daily receiving caps still apply. Gmail and Google Workspace are distinct hosts, as are Outlook.com and Microsoft 365.
 - **Where you are landing.** Warmbly tracks your spam-placement rate separately for each recipient mail host over the last seven days: who actually runs that recipient's mail (Google Workspace, Microsoft 365, Zoho Mail, Hostinger and so on), read from the partner's mail servers rather than its address, so two custom domains on different hosts are judged apart. A mailbox landing in spam at one host but not the others is sent fewer partners on that host until the rate falls, without waiting for an overall health band to trip. A free Gmail or Outlook.com mailbox works the other way at Google, Microsoft and Yahoo: it is sent more partners where it lands in spam (up to twice as many), because the pool rescues its mail at the [recovery](#recovery-engagement) rate and that rescue is what repairs its standing with that provider. Other hosts still get fewer.
 - **Your routing rules**, when you have configured any. A rule's weight multiplies a partner's chance; a weight of `0` is not a weight but an exclusion, so that pairing never happens.
 
@@ -300,6 +316,8 @@ The folder is created the first time it is needed, and it is also the answer to 
 
 Spam rescue is provider-specific: Gmail removes Spam and supports Important and Starred labels; Microsoft moves verified Junk messages to Inbox and supports high importance and a follow-up flag; IMAP moves messages out of recognized Spam/Junk folders and uses flags plus best-effort not-junk keywords. After a rescue runs, the mailbox reports whether the message moved, was already out of spam, was no longer there or was refused, and that is what the placement history shows. IMAP does not have a universal Gmail-style Important label, and SMTP-only mailboxes cannot perform recipient-side actions without mailbox access. A move is not proof that a provider learned a positive reputation signal. Filing remains housekeeping, not engagement evidence. Historical NULL/legacy retains existing behavior until explicit action. Upgrade the consumer, backend and workers together; previously skipped engagement is not replayed onto old mail.
 
+On a mailbox connected with **Sign in with Google**, or through a [whole-domain grant](/development/whole-domain-connect/#optional-scope-for-warmup-engagement-over-imap) whose delegation entry lists the optional `https://mail.google.com/` scope, the recipient-side actions (taking a message out of Spam, marking it read, starring it and marking it important) run over IMAP at `imap.gmail.com`, signed in with the mailbox's own Google token. A rescued message moves out of Spam to where the filing setting puts warmup: the inbox, the warmup label, or All Mail for **Archive it**. Starring sets Gmail's star, and marking important adds the Important label. Filing, retention deletes and removal checks still run on the Gmail API. The worker opens one IMAP session per mailbox at a time and closes it after a short idle period. A mailbox whose token lacks full mail access (a sign-in mailbox connected before Warmbly asked for it, or a delegation entry without the optional scope), or whose Workspace administrator has turned IMAP off, runs the same actions on the Gmail API instead. [Re-authorizing](/guides/mailboxes/#reconnecting-an-account) a Google sign-in mailbox asks for full mail access and moves its warmup actions to IMAP.
+
 Mail that arrives somewhere unexpected is still handled. A server-side rule, or another warmup tool's filter, can put warmup mail in a folder of its own choosing before Warmbly sees it; the message is found there and filed from there, and one already sitting in the destination is left alone rather than moved onto itself.
 
 Filing happens as each message arrives, so changing the setting applies to warmup from that point on.
@@ -309,6 +327,18 @@ If filing fails, it is not reported as completed. An updated worker can release 
 A sweep identifies missed application-owned diagnostics and applies authorized housekeeping. It does not establish retroactive authentication or engagement. Leaving mail in the inbox remains an owner choice.
 
 The sweep repairs what it can still see, so it does not clear a backlog that built up before the setting existed. To do that on Gmail, search `label:Warmbly` and archive the results: warmup mail has always carried the label, so that selects exactly it. On Outlook and IMAP the received mail is already in the folder, and only the Sent copies from before this change stay in Sent.
+
+### In another inbox tool
+
+A tool that reads only the inbox stops seeing warmup once it is filed. One that reads every folder, such as a shared inbox or another outreach platform, still picks it up from the `Warmbly` folder; exclude that folder in the tool. Another Warmbly workspace or instance can hide it with [warmup from other services](/guides/unibox/#warmup-from-other-services).
+
+When a tool can only filter on what a message says, turn on **Filter tag** on the mailbox's **Warmup** tab. Every warmup email the mailbox receives then ends with a short code, `k7q2-mx94-ab3d` for example, and a filter on that code catches all of it:
+
+- **Gmail:** search for the code, choose **Create filter**, then **Skip the Inbox** or **Apply the label**.
+- **Outlook:** add a rule for messages whose body includes the code, and move them to a folder.
+- **Other tools:** match mail whose body contains the code.
+
+It is off by default, and nothing about a mailbox's warmup changes until it is turned on. Use your own code instead of the random one through the [API](/api/reference/mailboxes/#warmup-filter-tag); **New code** issues a fresh one, after which filters on the old code stop matching new mail. The code goes only on mail this mailbox receives, and only from the moment it is on. The same code on every warmup email to the mailbox is a pattern its provider can see, which warmup otherwise avoids, so leave it off unless a tool needs it. A mailbox [Warmbly Cloud](/guides/warmbly-cloud/) warms gets its warmup from Cloud, which does not add the code.
 
 ### Retention
 
@@ -407,7 +437,7 @@ The standing follows the address, not the connection. Removing a mailbox from th
 
 ## Graduating to cold sending
 
-Diagnostic-history mailboxes start cold sending at a conservative ceiling of five/day. Synthetic age never increases it. Recent confirmed human replies to actual campaign recipients permit bounded increases, subject to calendar days and negative feedback. Missing evidence leaves readiness/full-cap dates unknown. This product policy is not a provider-approved safe volume. The ceiling applies while warmup is running or paused. Stopping warmup removes it, leaving the mailbox's own daily cap and minimum gap, and starting warmup again restores it from the recent reply evidence. See [easing out of warmup](/guides/campaigns/#easing-out-of-warmup).
+Diagnostic-history mailboxes start cold sending at a conservative ceiling of five/day. Synthetic age never increases it. Recent confirmed human replies to actual campaign recipients permit bounded increases, subject to calendar days and negative feedback. Missing evidence leaves readiness/full-cap dates unknown. This product policy is not a provider-approved safe volume. The ceiling applies in campaigns whose ramp-up is **As replies come in**, the default; a campaign can instead ramp on a schedule or send at full volume (see [ramp-up](/guides/campaigns/#ramp-up)). The ceiling applies while warmup is running or paused. Stopping warmup removes it, leaving the mailbox's own daily cap and minimum gap, and starting warmup again restores it from the recent reply evidence. See [easing out of warmup](/guides/campaigns/#easing-out-of-warmup).
 
 </Fold>
 

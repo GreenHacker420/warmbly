@@ -31,6 +31,10 @@ type WarmupToken struct {
 	ConversationID *uuid.UUID `json:"conversation_id,omitempty"`
 	// ConversationTurn is zero for the opening and increments for each reply.
 	ConversationTurn int `json:"conversation_turn"`
+	// SequenceID and VariantID name the campaign step and A/B arm a
+	// content_source="campaign" send carried.
+	SequenceID *uuid.UUID `json:"sequence_id,omitempty"`
+	VariantID  *uuid.UUID `json:"variant_id,omitempty"`
 	// Subject is what was actually sent, and SentMessageID is the Message-ID
 	// the provider put on the wire (which is not the one we minted on Graph).
 	// Both exist so the recipient can still resolve this token when the verify
@@ -107,8 +111,6 @@ type WarmupActionRequest struct {
 	WorkerID  uuid.UUID `json:"worker_id"`
 	Actions   []string  `json:"actions"`
 	FilingID  string    `json:"filing_id,omitempty"`
-	// CommandID is the Warmbly Cloud command an instance-executed mailbox's action runs under.
-	CommandID string `json:"command_id,omitempty"`
 }
 
 type WarmupActionDecision struct {
@@ -183,8 +185,6 @@ type WarmupEmailAction struct {
 	// the worker to answer with WARMUP_RESCUED.
 	InternalID string `json:"internal_id,omitempty" avro:"internal_id"`
 	FilingID   string `json:"filing_id,omitempty" avro:"filing_id"`
-	// CommandID binds the action to the Warmbly Cloud command it executes; empty for local warmup.
-	CommandID string `json:"command_id,omitempty" avro:"command_id"`
 
 	// Recheck marks a verify_removal for a strike recorded before removals
 	// were searched; the answer echoes it.
