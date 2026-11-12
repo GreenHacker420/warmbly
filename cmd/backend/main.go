@@ -990,6 +990,10 @@ func main() {
 		})
 		agencyService.WireMemberRemoval(oauthService.RevokeMemberGrants)
 		agencyService.WireAIBalance(repository.NewAgencyAIRepository(primaryDB), creditService != nil && !creditService.Unmetered())
+		// A charge that drew on an agency's shared AI balance checks its automatic top-up at once.
+		if hook, ok := creditService.(interface{ SetAgencyMonitor(func(uuid.UUID)) }); ok {
+			hook.SetAgencyMonitor(agencyService.OnAgencyAISpend)
+		}
 		if workerAssignmentService != nil {
 			agencyService.WireIsolatedEgress(workerAssignmentService)
 		}
@@ -2125,6 +2129,14 @@ func main() {
 			Cache:     cache,
 			NewClient: sandboxVendors,
 		})
+		// A client names its own vendor account on a connect link.
+		if connectLinkService != nil {
+			connectLinkService.WireVendors(vendorConnService)
+		}
+		// An agency holds a vendor account once and uses it in any client workspace.
+		if agencyService != nil {
+			vendorConnService.WireAgencies(repository.NewAgencyVendorRepository(primaryDB), agencyService, repository.NewAgencyHomeRepository(primaryDB.Pool), credEncrypter)
+		}
 
 		// Sending domains: tracking host per domain and the bare-domain redirect.
 		sendingDomainService = sendingdomain.NewService(repository.NewDomainRedirectRepository(primaryDB), emailRepostory, nil, domainProver)

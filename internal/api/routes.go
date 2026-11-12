@@ -281,6 +281,8 @@ func Run(
 		portal.POST("/connect-links/oauth/start", h.InternalStartConnectOAuth)
 		portal.POST("/connect-links/oauth/result", h.InternalConnectOAuthResult)
 		portal.POST("/connect-links/smtp-imap", h.InternalConnectSMTPIMAP)
+		portal.POST("/connect-links/vendor/mailboxes", h.InternalConnectVendorMailboxes)
+		portal.POST("/connect-links/vendor/import", h.InternalConnectVendorImport)
 	}
 
 	corsConfig := cors.Config{
@@ -1782,6 +1784,14 @@ func Run(
 				agencyRoutes.POST("/:agencyId/clients/:orgId/ai-balance", middleware.RequireAgencyAccess(models.APIPermAgencyTransferAI), middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.TransferAgencyAIBalance)
 				// The agency home and the cross-client inbox read each client through the caller's own membership in it.
 				agencyRoutes.GET("/:agencyId/overview", read, h.GetAgencyOverview)
+				agencyRoutes.GET("/:agencyId/mailboxes", read, h.ListAgencyMailboxes)
+				// Inbox vendor accounts the agency holds once and uses in any client; session-only, they carry keys.
+				agencyRoutes.GET("/:agencyId/vendors", sessionOnly, h.ListAgencyVendors)
+				agencyRoutes.POST("/:agencyId/vendors", sessionOnly, middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.CreateAgencyVendor)
+				agencyRoutes.PATCH("/:agencyId/vendors/:id", sessionOnly, middleware.RequireFreshAuth(), h.UpdateAgencyVendor)
+				agencyRoutes.DELETE("/:agencyId/vendors/:id", sessionOnly, middleware.RequireFreshAuth(), h.DeleteAgencyVendor)
+				// PUT: naming the same client twice answers with the connection it already has.
+				agencyRoutes.PUT("/:agencyId/vendors/:id/clients/:orgId", sessionOnly, h.UseAgencyVendor)
 				inbox := middleware.RequireAgencyAccess(models.APIPermAgencyRead | models.APIPermReadUnibox)
 				agencyRoutes.GET("/:agencyId/inbox", inbox, h.ListAgencyInbox)
 				agencyRoutes.GET("/:agencyId/inbox/thread", inbox, h.GetAgencyInboxThread)
@@ -1790,6 +1800,11 @@ func Run(
 				agencyRoutes.POST("/:agencyId/billing/checkout", sessionOnly, middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.AgencyCheckout)
 				agencyRoutes.GET("/:agencyId/billing/change/preview", sessionOnly, h.PreviewAgencyPlanChange)
 				agencyRoutes.POST("/:agencyId/billing/change", sessionOnly, middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.ChangeAgencyPlan)
+				agencyRoutes.GET("/:agencyId/billing/auto-topup", sessionOnly, h.GetAgencyAutoTopup)
+				// Turning it on lets the saved card be charged with nobody present.
+				agencyRoutes.PUT("/:agencyId/billing/auto-topup", sessionOnly, middleware.RequireFreshAuth(), h.SetAgencyAutoTopup)
+				agencyRoutes.GET("/:agencyId/billing/ai-auto-topup", sessionOnly, h.GetAgencyAIAutoTopup)
+				agencyRoutes.PUT("/:agencyId/billing/ai-auto-topup", sessionOnly, middleware.RequireFreshAuth(), h.SetAgencyAIAutoTopup)
 				agencyRoutes.POST("/:agencyId/billing/topup", sessionOnly, middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.AgencyTopup)
 				agencyRoutes.POST("/:agencyId/billing/ai-topup", sessionOnly, middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.AgencyAITopup)
 				agencyRoutes.POST("/:agencyId/billing/portal", sessionOnly, middleware.RequireFreshAuth(), h.AgencyPortal)
@@ -2340,13 +2355,14 @@ func Run(
 }
 
 // largeUploadRoute reports the routes whose handlers cap the body themselves
-// (maxImportUploadBytes), so the global cap does not cut them short.
+// (maxImportUploadBytes, models.MaxOrgArchiveUploadBytes), so the global cap does not cut them short.
 func largeUploadRoute(r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		return false
 	}
 	switch r.URL.Path {
-	case "/v1/contacts/imports", "/v1/contacts/import/preview", "/v1/contacts/import/commit":
+	case "/v1/contacts/imports", "/v1/contacts/import/preview", "/v1/contacts/import/commit",
+		"/v1/organization/current/import", "/v1/organization/current/import/preflight":
 		return true
 	}
 	return false

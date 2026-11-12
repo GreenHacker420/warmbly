@@ -219,7 +219,11 @@ var Tables = []Table{
 		Secrets: []SecretColumn{
 			{Column: "credentials", Domain: KeyDomainOrgDEK},
 		},
-		Note: "Inbox vendor accounts (InboxKit, Zapmail, ...) the workspace imports from. Above email_accounts, whose vendor_connection_id names them.",
+		// An agency's account lives on the instance that holds the agency, and its key was never in this row:
+		// the connection arrives as the workspace's own, waiting for a key.
+		ResetOnImport:           []string{"agency_connection_id"},
+		ResetColumnsOnOverwrite: []string{"agency_connection_id"},
+		Note:                    "Inbox vendor accounts (InboxKit, Zapmail, ...) the workspace imports from. Above email_accounts, whose vendor_connection_id names them. A connection made from an agency's account holds no key, so it travels without one.",
 	},
 	{
 		Name: "mailbox_domain_grants", Group: models.OrgDataGroupCore,
@@ -243,7 +247,7 @@ var Tables = []Table{
 		Name: "email_accounts", Group: models.OrgDataGroupCore,
 		Scope:                   scopeOrg,
 		ExcludeOnExport:         []string{"transport_generation"},
-		ResetColumnsOnOverwrite: []string{"transport_generation"},
+		ResetColumnsOnOverwrite: []string{"transport_generation", "activated_at"},
 		InvalidateOnImport: []repository.ImportInvalidation{{
 			Table: "email_account_transport_recovery", Column: "email_account_id", Key: "id",
 			LockNamespaces: []int64{repository.SendResultMailboxLockNamespace, repository.MailTransportLockNamespace},
@@ -277,8 +281,9 @@ var Tables = []Table{
 		// send_claimed_at is this instance's per-send gap lock.
 		// previous_worker_id and worker_released_at name a worker on this instance.
 		// signin_switch_* is this instance's vendor reconnect attempt; the destination makes its own.
+		// activated_at restarts so the destination's unreachable sweep measures only its own connection attempts.
 		ResetOnImport: []string{
-			"transport_generation",
+			"transport_generation", "activated_at",
 			"worker_id", "auth_checked_at", "auth_failing_since", "cold_ramp_started_at",
 			"send_lifecycle", "send_lifecycle_since", "send_lifecycle_reason", "seed_scope",
 			"avatar_checked_at", "tracking_domain_verified", "tracking_domain_verified_at",
@@ -1140,6 +1145,7 @@ var Tables = []Table{
 var ExcludedTables = map[string]string{
 	"mailbox_connect_links":            "Single-use sign-in links whose URL points at the source instance and whose secret only the recipient holds. The mailboxes they connected travel; open links do not, so new ones are created on the destination.",
 	"agency_clients":                   "The link to an agency, its billing and its shared send pool belongs to the source instance. An imported workspace starts outside any agency; the agency attaches it again on the destination.",
+	"agency_vendor_connections":        "Inbox vendor accounts an agency holds for its clients, kept against the agency and sealed with the instance key. A client workspace's own connection to one travels without the agency's key.",
 	"agency_ai_transactions":           "The agency's ledger of its shared AI balance on the source instance, kept against the agency rather than the workspace. Money already moved into the workspace travels in its own balance; the destination's agency funds it from when it attaches it.",
 	"agency_pool_usage_days":           "The agency's ledger of pool use on the source instance, kept against the agency rather than the workspace. The destination's agency counts the workspace's sends from when it attaches it.",
 	"website_domains":                  "A website's proof is a TXT value bound to the source workspace, so it proves nothing for the destination. The destination shows its own TXT value on each sending-domain redirect that points at the website, and serves redirects and forms there once it is published.",
