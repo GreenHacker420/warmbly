@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/warmbly/warmbly/internal/errx"
@@ -263,7 +264,11 @@ func (c *Client) FetchMessage(ctx context.Context, folder, id string) (*GraphMes
 		return nil, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, HandleError(resp)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		if isMessagePurged(resp.StatusCode, body) {
+			return nil, nil
+		}
+		return nil, handleErrorWithBody(resp, body)
 	}
 	var msg GraphMessage
 	if err := json.NewDecoder(resp.Body).Decode(&msg); err != nil {
@@ -274,6 +279,27 @@ func (c *Client) FetchMessage(ctx context.Context, folder, id string) (*GraphMes
 		return nil, unreadableResponse(resp, err)
 	}
 	return &msg, nil
+}
+
+func isMessagePurged(status int, body []byte) bool {
+	if status == http.StatusNotFound {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	var env graphErrorEnvelope
+	if err := json.Unmarshal(body, &env); err != nil {
+		return false
+	}
+	code, msg := env.Error.Code, env.Error.Message
+	if code == "ErrorItemNotFound" {
+		return true
+	}
+	if code == "ErrorAccessDenied" && (strings.Contains(msg, "isn't an ID of an item") || strings.Contains(msg, "InternalAccess")) {
+		return true
+	}
+	return false
 }
 
 // ListMessagesSince is one page of the backfill for a folder: full messages

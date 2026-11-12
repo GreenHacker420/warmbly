@@ -41,6 +41,10 @@ type graphErrorEnvelope struct {
 //   - 5xx / other -> server unreachable (retry)
 func HandleError(resp *http.Response) *errx.MailError {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	return handleErrorWithBody(resp, body)
+}
+
+func handleErrorWithBody(resp *http.Response, body []byte) *errx.MailError {
 	var env graphErrorEnvelope
 	_ = json.Unmarshal(body, &env)
 

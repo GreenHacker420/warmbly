@@ -120,6 +120,20 @@ func TestFetchMessageStillTreatsNotFoundAsASkip(t *testing.T) {
 	}
 }
 
+// When Exchange purges an item (dumpster/internal access), Graph returns 403 ErrorAccessDenied
+// saying the store ID isn't an ID of an item. FetchMessage must treat this as vanished/nil.
+func TestFetchMessageTreatsPurgedStoreItemAsASkip(t *testing.T) {
+	body := `{"error":{"code":"ErrorAccessDenied","message":"Access is denied. Check credentials and try again., The store ID provided isn't an ID of an item."}}`
+	c := graphStatus(t, http.StatusForbidden, body)
+	msg, err := c.FetchMessage(context.Background(), FolderInbox, "purged")
+	if err != nil {
+		t.Fatalf("FetchMessage returned %v, want a silent skip", err)
+	}
+	if msg != nil {
+		t.Fatalf("FetchMessage returned %+v, want nil", msg)
+	}
+}
+
 // A success status with a body that is not JSON is named as such, not passed
 // up as a bare decode error or dressed as an unreachable server.
 func TestUnreadableSuccessBodyIsNamed(t *testing.T) {
