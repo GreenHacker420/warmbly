@@ -1143,6 +1143,7 @@ var Tables = []Table{
 // with the reason. Kept as data so the docs page and the coverage test both
 // read from one list instead of restating it.
 var ExcludedTables = map[string]string{
+	"organization_partner_referrals":   "The partner-program click and the Dub customer it became belong to this instance's Dub workspace, and commissions keep following the Stripe customer here. The destination has no partner program for it.",
 	"mailbox_connect_links":            "Single-use sign-in links whose URL points at the source instance and whose secret only the recipient holds. The mailboxes they connected travel; open links do not, so new ones are created on the destination.",
 	"agency_clients":                   "The link to an agency, its billing and its shared send pool belongs to the source instance. An imported workspace starts outside any agency; the agency attaches it again on the destination.",
 	"agency_vendor_connections":        "Inbox vendor accounts an agency holds for its clients, kept against the agency and sealed with the instance key. A client workspace's own connection to one travels without the agency's key.",
@@ -1201,6 +1202,9 @@ var ExcludedTables = map[string]string{
 	"mailbox_import_rows":              "The rows of a mailbox import, with credentials sealed until each row is connected. They follow mailbox_imports, which does not travel.",
 	"contact_imports":                  "Contact imports in progress or recently finished. They are work this instance is doing; the contacts they created travel with the contacts group.",
 	"contact_import_rows":              "The uploaded rows of a contact import and what became of each. They follow contact_imports, which does not travel.",
+	"tool_migrations":                  "Migrations from another outreach tool. They are work this instance is doing and hold the other tool's keys while they run; what they brought over travels in its own tables.",
+	"tool_migration_targets":           "The workspaces a migration from another tool writes into and its progress in each. They follow tool_migrations, which does not travel.",
+	"tool_migration_items":             "Which campaigns and contacts a migration from another tool already created, so a resumed run does not create them twice. They follow tool_migrations, which does not travel.",
 	"placement_renders":                "The copy a tracking comparison is sending to each seed, sealed so both halves send the same words. It lives only while the comparison runs, and a copy that had not been sent stays behind with its task.",
 	"inbox_follow_up_sweeps":           "This instance's hourly follow-up sweep state for the workspace: where its cycle stopped (by this instance's mailbox and message row ids), how far it has checked changed conversations, and which walker holds it. The destination starts its own cycle at the newest conversation.",
 	"slack_user_links":                 "Which Slack member speaks for which Warmbly member. Slack delivers that member's messages to the instance whose Slack app the workspace installed, so each member links again after the workspace reconnects Slack on the destination.",

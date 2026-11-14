@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/warmbly/warmbly/internal/app/fleetjoin"
 	"github.com/warmbly/warmbly/internal/app/fleetmetrics"
+	"github.com/warmbly/warmbly/internal/app/fleetscale"
 	"github.com/warmbly/warmbly/internal/app/mailpush"
 	"log"
 	"net/http"
@@ -109,6 +111,7 @@ import (
 	orgrisk "github.com/warmbly/warmbly/internal/app/orgrisk"
 	"github.com/warmbly/warmbly/internal/app/orgtransfer"
 	"github.com/warmbly/warmbly/internal/app/owndomain"
+	"github.com/warmbly/warmbly/internal/app/partners"
 	"github.com/warmbly/warmbly/internal/app/passkey"
 	"github.com/warmbly/warmbly/internal/app/pipedrive"
 	"github.com/warmbly/warmbly/internal/app/placement"
@@ -135,6 +138,7 @@ import (
 	"github.com/warmbly/warmbly/internal/app/team"
 	"github.com/warmbly/warmbly/internal/app/template"
 	"github.com/warmbly/warmbly/internal/app/token"
+	"github.com/warmbly/warmbly/internal/app/toolmigrate"
 	"github.com/warmbly/warmbly/internal/app/trial"
 	"github.com/warmbly/warmbly/internal/app/twofa"
 	"github.com/warmbly/warmbly/internal/app/tz"
@@ -219,6 +223,8 @@ func main() {
 	var emailService email.EmailService
 	var mailboxImportService *mailboximport.Service
 	var contactImportService *contactimport.Service
+	var toolMigrationService *toolmigrate.Service
+	var toolMigrations toolmigrate.API
 	var hubspotService *hubspot.Service
 	var pipedriveService *pipedrive.Service
 	var crmModes *crmmode.Registry
@@ -355,6 +361,7 @@ func main() {
 		adminSyncRepo         repository.AdminSyncRepository
 		adminSendsRepo        repository.AdminSendsRepository
 		adminFleetRepo        repository.AdminFleetRepository
+		fleetScale            *fleetscale.Service
 		adminInsightRepo      repository.AdminInsightRepository
 		jobRunRepo            repository.JobRunRepository
 		webhookRepoForHandler repository.WebhookRepository
@@ -1157,6 +1164,18 @@ func main() {
 		// Where a signup came from, written onto the new org once it exists.
 		authService.WireAcquisition(organizationRepository)
 
+		// Partner program on Dub: hosted-only, off unless DUB_API_KEY is set.
+		if partnerProgram := partners.New(cfg.GetSecretOptional(ctx, "DUB_API_KEY", "dub/api_key", ""), repository.NewPartnerReferralRepository(primaryDB.Pool)); partnerProgram != nil {
+			authService.WirePartners(partnerProgram)
+			if w, ok := stripeService.(interface {
+				WirePartners(stripe.PartnerAttribution)
+			}); ok {
+				w.WirePartners(partnerProgram)
+			}
+			go partnerProgram.Start(ctx, 10*time.Minute)
+			log.Printf("Partner program: Dub attribution on")
+		}
+
 		// Server-side product analytics. Nil (and therefore off) unless the
 		// operator set POSTHOG_KEY, which no self-host does: the events are
 		// only useful to whoever runs the hosted service. The client is
@@ -1486,7 +1505,7 @@ func main() {
 		rateLimitRepository := repository.NewRateLimitRepository(primaryDB)
 		rateLimitService = ratelimit.NewService(cache, rateLimitRepository)
 		sequenceService = sequence.NewService(sequenceRepostory)
-		contactService = contact.NewService(contactRepostory, subscriptionRepository, planRepository, streamingPublisher)
+		contactService = contact.NewService(contactRepostory, featureGateService, streamingPublisher)
 		segmentRepository := repository.NewSegmentRepository(primaryDB)
 		segmentService = segment.NewService(segmentRepository, contactRepostory)
 		// Imports write segment include overrides, and every contact-mutating
@@ -1764,6 +1783,26 @@ func main() {
 			aware.WireAttachments(attachmentRepoForHandler)
 		}
 
+		// Migrations from other outreach tools; the mailbox importer is wired once it exists.
+		toolMigrationDeps := toolmigrate.Deps{
+			Repo:       repository.NewToolMigrationRepository(primaryDB),
+			Registry:   toolmigrate.Registry(),
+			Sealer:     credEncrypter,
+			Contacts:   contactService,
+			Campaigns:  campaignService,
+			Steps:      sequenceService,
+			Outreach:   advancedService,
+			Categories: contactRepostory,
+			Members:    organizationService,
+			Auditor:    auditService,
+		}
+		if agencyService != nil {
+			toolMigrationDeps.Agencies = agencyService
+			toolMigrationDeps.AgencyClients = repository.NewAgencyHomeRepository(primaryDB.Pool)
+		}
+		toolMigrationService = toolmigrate.NewService(toolMigrationDeps)
+		toolMigrations = toolMigrationService
+
 		// Shared AI tool registry: every tool calls a service-layer function as
 		// the invoking user, so the dashboard agent (M3) and MCP server (M8) can
 		// never exceed the caller's permissions. Built once here with the same
@@ -1784,23 +1823,24 @@ func main() {
 				}
 				return leadFinderServiceForHandler.WorkspaceWebSearch(ctx, orgID)
 			},
-			Cache:        cache,
-			Emails:       emailService,
-			EmailSend:    emailSendService,
-			Compose:      composeService,
-			Warmup:       warmupService,
-			Sequences:    sequenceService,
-			Org:          organizationService,
-			APIKeys:      apiKeyService,
-			Webhooks:     webhookServiceForHandler,
-			Subscription: subscriptionService,
-			Segments:     segmentService,
-			Forms:        formService,
-			Advanced:     advancedService,
-			Suppressions: advancedService,
-			FeatureGate:  featureGateService,
-			Skills:       skillsService,
-			AppBaseURL:   cfg.GetStringOptional(ctx, "APP_BASE_URL", "app_base_url", ""),
+			Cache:          cache,
+			Emails:         emailService,
+			EmailSend:      emailSendService,
+			Compose:        composeService,
+			Warmup:         warmupService,
+			Sequences:      sequenceService,
+			Org:            organizationService,
+			APIKeys:        apiKeyService,
+			Webhooks:       webhookServiceForHandler,
+			Subscription:   subscriptionService,
+			Segments:       segmentService,
+			Forms:          formService,
+			Advanced:       advancedService,
+			Suppressions:   advancedService,
+			FeatureGate:    featureGateService,
+			ToolMigrations: toolMigrations,
+			Skills:         skillsService,
+			AppBaseURL:     cfg.GetStringOptional(ctx, "APP_BASE_URL", "app_base_url", ""),
 			// tasksService is built later in boot, so it is read at call time.
 			WarmupScheduler: func(ctx context.Context, accountID uuid.UUID) error {
 				if tasksService == nil {
@@ -2190,6 +2230,7 @@ func main() {
 			go mailboxAvatars.Start(ctx)
 		}
 		vendorConnService.SetImporter(mailboxImportService)
+		toolMigrationService.WireMailboxes(mailboxImportService)
 		vendorConnService.WireSigninSwitch(auditService, func(ctx context.Context) bool {
 			return instanceSettings == nil || instanceSettings.AutoVendorReconnect(ctx)
 		})
@@ -2306,6 +2347,26 @@ func main() {
 		// same one for as long as it holds the lock, so a fleet of replicas does
 		// the work once instead of once per replica.
 		elector := leader.New(primaryDB, "backend")
+
+		// The worker Auto Scaling Group joins with the token in this parameter; unset on every other deployment.
+		if parameter := fleetjoin.Parameter(); parameter != "" && fleetNodeService != nil {
+			elector.Go("fleet_join_token", func(ctx context.Context) {
+				if err := fleetjoin.Run(ctx, fleetNodeService, parameter, fleetjoin.KMSKey()); err != nil {
+					log.Printf("Warning: fleet join token renewal disabled: %v", err)
+				}
+			})
+		}
+
+		// The worker Auto Scaling Group's cap, adjustable from the admin panel; unset on every other deployment.
+		if group := fleetscale.GroupName(); group != "" {
+			svc, err := fleetscale.New(ctx, group)
+			if err != nil {
+				log.Printf("Warning: fleet autoscaling disabled: %v", err)
+			} else {
+				fleetScale = svc
+				elector.Go("fleet_scale_cap", func(ctx context.Context) { fleetscale.Watch(ctx, svc) })
+			}
+		}
 
 		// Worker reconciler: assign + (re)load every active mailbox onto its
 		// worker. Workers hold accounts in memory only, so this is what makes a
@@ -2440,6 +2501,7 @@ func main() {
 			})
 			go contactImportService.Run(ctx)
 		}
+		go toolMigrationService.Run(ctx)
 		if contactService != nil {
 			// The lead finder's keyed providers read the workspace's own key first,
 			// then the operator's; OpenStreetMap needs none.
@@ -2618,7 +2680,9 @@ func main() {
 			// (enforced or not, and the grace window) instead of a default one.
 			advisor.WithDomainAuthPolicy(instanceSettings),
 			// So the warmup findings never ask a plan without warmup to turn it on.
-			advisor.WithWarmupAccess(featureGateService))
+			advisor.WithWarmupAccess(featureGateService),
+			// A self-host warms only among its own mailboxes, so missing warmup is advice there, not an alarm.
+			advisor.WithSelfHosted(config.SelfHosted()))
 		aitools.RegisterAdvisorTools(aiToolRegistry, advisorService)
 		go (&advisor.Runner{Repo: advisorRepository, Service: advisorService}).Run(ctx)
 
@@ -2710,6 +2774,7 @@ func main() {
 		EmailService:         emailService,
 		MailboxImportService: mailboxImportService,
 		ContactImportService: contactImportService,
+		ToolMigrations:       toolMigrations,
 		DelegationService:    delegationService,
 		VendorConnService:    vendorConnService,
 		SendingDomainService: sendingDomainService,
@@ -2888,6 +2953,7 @@ func main() {
 		AdminSyncRepo:    adminSyncRepo,
 		AdminSendsRepo:   adminSendsRepo,
 		AdminFleetRepo:   adminFleetRepo,
+		FleetScale:       fleetScale,
 		AdminInsightRepo: adminInsightRepo,
 		JobRuns:          jobRunRepo,
 		WebhookRepo:      webhookRepoForHandler,
@@ -2896,6 +2962,12 @@ func main() {
 		// fallback (audit.NewNoOpService) remains for entrypoints without
 		// a database.
 		AuditService: auditService,
+	}
+	// Agency keys on the MCP server see the agency tools, migrations included.
+	if agencyService != nil {
+		h.AgencyTools = aitools.BuildAgencyRegistry(aitools.AgencyDeps{
+			Agency: agencyService, Home: agencyHomeService, ToolMigrations: toolMigrations, Audit: auditService,
+		})
 	}
 
 	m := &middleware.Handler{

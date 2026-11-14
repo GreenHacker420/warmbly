@@ -43,7 +43,7 @@ Admission denial before dispatch releases the send reservation without spending 
 | 400 | Bad Request | Invalid request syntax or parameters, or a quota that would be passed (`storage_limit_reached`) |
 | 401 | Unauthorized | Missing or invalid authentication |
 | 402 | Payment Required | The workspace balance is too low (`insufficient_credits`), a card was not charged when adding money (`card_declined`, `authentication_required`, `payment_failed`), or no free placement tests left this month (`placement_quota_exceeded`, `placement_not_entitled`) |
-| 403 | Forbidden | Authenticated but lacks permission, or the workspace's mailbox allowance is full (`mailbox_allowance_reached`) |
+| 403 | Forbidden | Authenticated but lacks permission, the workspace's mailbox allowance is full (`mailbox_allowance_reached`), or new contacts would pass its contact limit (`contact_limit_reached`) |
 | 404 | Not Found | Resource doesn't exist |
 | 409 | Conflict | Resource already exists |
 | 422 | Unprocessable | Validation failed |
@@ -773,6 +773,12 @@ A session signed in on an agency's [portal domain](/guides/white-label/#where-cl
 | `portal_handoff_origin` | 403 | `POST /auth/portal/handoff` from anywhere but the main dashboard address, or from a session signed in on a portal |
 | `portal_not_found` | 404 | `POST /auth/portal/handoff` for a host that is not a verified portal whose agency signs its clients in on the main address |
 
+#### Fleet cap refusals
+
+| `code` | Status | Meaning |
+|--------|--------|---------|
+| `fleet_max_out_of_range` | 400 | `PATCH /admin/fleet/scale` asked for a cap below the running fleet or the group's minimum, or above its `warmbly:max-ceiling` tag. The message names the allowed range |
+
 #### Automation refusals
 
 | `code` | Status | Meaning |
@@ -864,6 +870,7 @@ Returned when authenticated but lacking necessary permissions.
 - Email account not in allowlist
 - Organization access restricted
 - The member is restricted to selected resources (`member_access_restricted`)
+- The workspace would pass its contact limit (`contact_limit_reached`)
 
 **Example:**
 
@@ -1129,6 +1136,7 @@ A few conflicts carry their own `code`. The mailbox import's are under [mailbox 
 | `charge_in_progress` | 409 | `POST /subscription/balance/top-up` while another payment for the workspace is still going through. Try again in a minute |
 | `idempotency_outcome_unknown` | 409 | The request that first used this `Idempotency-Key` ended in a server error or never finished, so whether it took effect is unknown and it is not run again while the key is kept (24 hours). Retry with a new key only once you have established that the change did not happen. See [retry safety](/api/endpoints/#retry-safety) |
 | `mailbox_cloud_unenroll_failed` | 409 | The mailbox is linked to [Warmbly Cloud](/guides/warmbly-cloud/) and its link could not be released, so `DELETE /emails/{id}` would leave Warmbly Cloud holding its credential or its claim on it. The mailbox record remains, and restoration onto its worker is attempted |
+| `fleet_max_ceiling_missing` | 409 | `PATCH /admin/fleet/scale` on a worker Auto Scaling Group without a `warmbly:max-ceiling` tag. Apply the workers Terraform root, which sets it |
 
 `mailbox_cloud_unenroll_failed` is a self-hosted instance losing contact with Warmbly Cloud mid-delete. Deleting an enrolled mailbox has to revoke its enrollment before the record goes, because the pool holds the mailbox's own SMTP/IMAP credentials and that record is the only thing that knows the enrollment exists. The same call releases a cloud-managed mirror before the record goes, so the mailbox returns to the cloud workspace and can be adopted again instead of staying claimed by an instance that no longer keeps it. The mailbox record remains. Warmbly attempts to restore it onto its worker immediately, and the worker reconciler may restore it later if that attempt fails. Retry the delete once the instance can reach the cloud again. Unenrolling under **Settings > Warmbly Cloud** first does not help: it makes the same call.
 
@@ -1244,6 +1252,10 @@ A `503` whose `code` is `mailbox_provider_not_configured` is not transient and r
 - Or connect the mailbox over SMTP and IMAP instead, which needs no configuration
 - Full walkthrough: [connect mailboxes](/development/deployment-guide/#connect-mailboxes)
 
+#### `fleet_autoscaling_not_configured`
+
+`/admin/fleet/scale` on an instance whose backend does not set `FLEET_AUTOSCALING_GROUP`. Only an instance running the [AWS worker fleet](/development/aws-workers/#change-the-fleet-cap) sets it.
+
 #### `ai_not_configured`
 
 A `503` whose `code` is `ai_not_configured` is not transient and retrying will not help. It comes from `POST /templates/analyze` and means the deployment has no AI provider set up at all. It is how a client tells "there is no AI here" apart from "the provider is having a bad minute", which returns the generic `service_unavailable` and is worth retrying.
@@ -1298,6 +1310,24 @@ A `403` whose `code` is `mailbox_allowance_reached` comes from every path that c
 - Without a paid plan, choose one: every paid plan connects mailboxes
 - Submit a limit-increase request for `max_email_accounts` via `POST /organization/:orgId/limit-requests`, or move to a plan with more daily sends. An approved request raises the allowance immediately; retry the connect then
 - Reconnecting an existing mailbox never returns this code
+
+#### `contact_limit_reached`
+
+A `403` whose `code` is `contact_limit_reached` comes from `POST /contacts` and from starting a contact import. A Google Sheets sync refused this way records the same message as its last error, and a Salesforce import fails with it. It is not a permission problem: the new contacts would take the workspace past its contact limit. The limit and the count are the workspace's, whichever member adds the contacts, and an address the workspace already holds is an update, not a new contact. The limit is the plan's (`100` on the free trial), unless an approved limit increase raised it. The import preview reports the same refusal in `problem` before anything is uploaded. A form submission over the limit is still stored, without becoming a contact. Nothing was added.
+
+```json
+{
+  "error": "Forbidden",
+  "message": "Adding 20 contacts would take this workspace past its limit of 100 (it has 90). Remove contacts, request an increase, or upgrade your plan.",
+  "code": "contact_limit_reached",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
+}
+```
+
+**How to fix:**
+- Read `limits.max_contacts` and `counts.total_contacts` from `GET /organization/current/limits` to see how much room is left
+- Submit a limit-increase request for `max_contacts` via `POST /organization/:orgId/limit-requests`, or move to a plan with more contacts. An approved request raises the limit immediately
+- Import fewer new contacts, or remove contacts you no longer need, then retry
 
 #### `invalid_attachment`
 
@@ -1651,6 +1681,32 @@ The client's connect page shows these, each in its own words:
 | `client_link_rate_limited` | 429 | Too many attempts through this link in the last hour |
 
 A workspace at its mailbox allowance refuses the connect with the usual `mailbox_allowance_reached`, which the page words for the client.
+
+## Tool migration refusals
+
+The [migration](/guides/migrate-from-another-tool/) routes (`/migrations` and `/agency/:agencyId/migrations`) answer these. Problems inside a running migration are not HTTP errors: the migration or the source workspace carries them in `error`, and what did not carry over is listed in each target's `followup.notes`.
+
+| `code` | Status | Meaning |
+|--------|--------|---------|
+| `tool_migration_provider_unknown` | 400 | `provider` is not one of the tools `GET /migrations/providers` lists |
+| `tool_migration_key_rejected` | 422 | The other tool refused a key, or the key lacks the access the migration needs. The `message` is the tool's reason, and names which key (`Key 2: ...`) when there are several. Nothing is stored |
+| `tool_migration_provider_unavailable` | 503 | The other tool did not answer in time or could not be read. Try again in a few minutes |
+| `tool_migration_limit` | 409 | 5 migrations are already scanning or running in this workspace or agency. Wait for one to finish, or cancel one |
+| `tool_migration_not_ready` | 409 | `POST /migrations/:id/start` on a migration whose scan has not finished, failed, or that already finished or was canceled. Wait for `ready`, or start a new migration |
+| `tool_migration_running` | 409 | `DELETE /migrations/:id` on a migration that is still scanning or running. Cancel it first |
+| `tool_migration_target_invalid` | 400 | A `targets` entry names a source workspace the scan did not find, names one twice, names one that could not be read, maps to a workspace that is not one of the agency's clients, or gives both or neither of `organization_id` and `create_name`. A workspace's own migration accepts only `skip` |
+| `tool_migration_in_flight_unsupported` | 400 | `in_flight` is `continue`, which is not available. Choose `skip` or `restart` |
+| `tool_migration_permission` | 403 | The caller lacks a permission the migration needs: `manage_contacts`, plus `manage_campaigns` for campaigns and `manage_emails` for mailboxes, in the workspace or in each client it writes to. Also answered to a member restricted to selected resources, to agency staff who are not the owner or an admin, and to staff without an accepted membership in a client |
+| `tool_migration_not_found` | 404 | No migration with that id in this workspace or agency |
+
+```json
+{
+  "error": "Unprocessable",
+  "message": "Key 2: the API key was not accepted.",
+  "code": "tool_migration_key_rejected",
+  "request_id": "4bbbd1b2-8f86-47dd-8a7f-9476501ad20e"
+}
+```
 
 ## Admin send hold errors
 

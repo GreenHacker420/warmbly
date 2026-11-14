@@ -67,7 +67,11 @@ The new workspace records acquisition once. In the admin panel, **Organizations 
 
 Sources come from campaign tags or the browser's referrer, not guesses. Warmbly's own domains are not external sources. Browsers, search engines and apps can withhold referrers; absent source information is shown as **Unknown**, even when the landing page is known. Full referrer URLs, search queries and landing-page query strings are not stored. Acquisition values are limited in length and email-shaped values are redacted by the backend.
 
-The marketing site stays cookieless, with no persistent PostHog identity. Attribution travels in URLs, not cookies or browser storage. It survives linked navigation but cannot reliably reconnect a later unrelated visit, another device or a URL whose attribution parameters were removed. It is not a complete anonymous browsing history. Existing saved acquisition remains unchanged, and missing historical sources are not backfilled. No new configuration or database migration is required.
+The marketing site stays cookieless, with no persistent PostHog identity. Attribution travels in URLs, not cookies or browser storage. It survives linked navigation but cannot reliably reconnect a later unrelated visit, another device or a URL whose attribution parameters were removed. It is not a complete anonymous browsing history. Existing saved acquisition remains unchanged, and missing historical sources are not backfilled.
+
+Signups through Google, Apple or single sign-on record acquisition the same way as an email signup, when the sign-in creates a new workspace.
+
+A partner referral on Warmbly Cloud (a `?via=` link) travels the same way, as `wb_click` in the links, with no cookie. A signup on a later visit that did not come through the partner's link is not credited to the partner, unless that visit opens an address that still carries `wb_click`, such as a bookmark. See [partner program](/development/configuration/#partner-program).
 
 </Fold>
 
@@ -217,7 +221,7 @@ These records back the engagement rows on a contact's [activity timeline](/guide
 | Warmup status | Whether warmup is on, actual volume today, the target the scheduler is using, max volume, configured reply target, and elapsed warmup days |
 | Warmup health | Pool standing: healthy, watch, throttled, quarantined, or blocked, with the score and reason the band decided, and the block expiry |
 
-The overview calls the configured percentage **Reply target**: the target share of the mailbox's own warmup sends that are replies over its last seven UTC days (see [warmup replies](/guides/warmup/#replies)). The Analytics tab's warmup reply rate is warmup replies sent by the mailbox divided by all its warmup sends in the selected range. It approaches the target when eligible received mail is available. Small send counts, a changed target, thread limits, and partner availability can make the measured rate differ; a selected range can also include sends from before the target changed. It does not measure how many of the mailbox's outgoing messages received an answer. Its **Target met** percentage is actual warmup sends divided by planned target volume across the active days in the selected range; it can exceed 100% when volume beats the plan.
+The overview calls the configured percentage **Reply target**: the target share of the mailbox's own warmup sends that are replies over its last seven UTC days (see [warmup replies](/guides/warmup/#replies)). The Analytics tab's warmup reply rate is warmup replies sent by the mailbox divided by all its warmup sends in the selected range. It approaches the target when eligible received mail is available. Small send counts, a changed target, thread limits, and partner availability can make the measured rate differ; a selected range can also include sends from before the target changed. It does not measure how many of the mailbox's outgoing messages received an answer. Its **Target met** percentage is actual warmup sends divided by planned target volume, over the days in the selected range that have a recorded plan; it can exceed 100% when volume beats the plan, and shows a dash when no day in the range has one.
 
 Use this to find the one mailbox dragging down a campaign's bounce rate instead of blaming the campaign.
 

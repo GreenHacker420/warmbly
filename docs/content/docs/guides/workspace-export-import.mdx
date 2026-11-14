@@ -192,6 +192,7 @@ Some things belong to an instance rather than to a workspace, so they are not ap
 | Not imported | Why |
 |--------------|-----|
 | Billing history | Subscription, credits, and referral balances belong to the platform that was paid. The destination issues its own |
+| Partner referral | Which partner a workspace signed up through belongs to the source instance's partner program, and its commissions follow the subscription there |
 | Agency membership | The link to an [agency](/guides/agencies/), its plan, its shared send pool and its shared AI balance belong to the source instance, and the archive does not carry it. The workspace arrives outside any agency, and members the agency added arrive as ordinary members. The agency's brand, portal domain and [API keys](/guides/agencies/#api) stay with the agency; the workspace's own [brand](/guides/white-label/) and its logo travel |
 | Plan limit overrides | A capacity grant is a decision by one platform's operators, not a property the workspace carries |
 | Plan offers | They are granted by one platform's operators. The destination's operators decide their own, and the archive does not carry them at all |
@@ -269,6 +270,8 @@ A few things belong to the instance rather than the workspace and are left out o
 [Client connect links](/guides/agencies/#client-connect-links) do not travel. Each one is a live way into the workspace for whoever holds it, and its address names the source instance, so moving it would let a link sent for the source connect mailboxes into the destination. The mailboxes clients connected are ordinary mailboxes and move with the Workspace group. Send new links from the destination.
 
 [Contact imports](/guides/contacts-crm/#importing) do not travel, finished or running, for the same reason: an import is work the source instance is doing. The contacts it created are ordinary contacts and move with the Contacts group, and the saved column mappings come with them. Let a running import finish before exporting, or the rows it has not reached are not in the archive.
+
+[Migrations from another tool](/guides/migrate-from-another-tool/) do not travel, finished or running. A migration is work the source instance is doing, and while it runs it holds the other tool's API key. What it brought over (contacts, draft campaigns, mailboxes and suppressions) is ordinary workspace data and moves with its group. Let a running migration finish before exporting, or what it has not reached yet is not in the archive.
 
 The list of past exports and imports does not travel either. Each job is a record of work the instance that ran it did, and an export's archive lives in that instance's storage until it expires. The destination lists only the exports and imports run there.
 

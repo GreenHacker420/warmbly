@@ -1073,6 +1073,23 @@ func Run(
 				contacts.DELETE("/:id/salesforce/links/:linkId", m.RequireAccess(models.PermUseIntegrations, models.APIPermIntegrations), h.UnlinkContactSalesforce)
 			}
 
+			// Migrations from another outreach tool. The service also requires the
+			// campaign and mailbox permissions for those kinds; the protected group
+			// already honours Idempotency-Key on the POSTs.
+			toolMigrations := protected.Group("/migrations")
+			toolMigrations.Use(m.RequireOrganization(), m.RequireAccess(models.PermManageContacts, models.APIPermImportTools),
+				m.RateLimitMiddleware(models.RateLimitWrite), middleware.UUIDParams("id"))
+			{
+				toolMigrations.GET("/providers", h.ListToolMigrationProviders)
+				toolMigrations.GET("", h.ListToolMigrations)
+				toolMigrations.POST("", h.CreateToolMigration)
+				toolMigrations.GET("/:id", h.GetToolMigration)
+				toolMigrations.POST("/:id/start", h.StartToolMigration)
+				toolMigrations.POST("/:id/cancel", h.CancelToolMigration)
+				toolMigrations.POST("/:id/link-senders", h.LinkToolMigrationSenders)
+				toolMigrations.DELETE("/:id", h.DismissToolMigration)
+			}
+
 			// Group endpoints map to the resources they organize: campaign
 			// Segments: saved contact audiences. Contact permissions on both
 			// sides, since a segment is only a view over contacts.
@@ -1785,6 +1802,16 @@ func Run(
 				// The agency home and the cross-client inbox read each client through the caller's own membership in it.
 				agencyRoutes.GET("/:agencyId/overview", read, h.GetAgencyOverview)
 				agencyRoutes.GET("/:agencyId/mailboxes", read, h.ListAgencyMailboxes)
+				// Client accounts migrated in from another outreach tool; the service checks staff and each client membership.
+				migrate := middleware.RequireAgencyAccess(models.APIPermAgencyMigrate)
+				agencyRoutes.GET("/:agencyId/migrations/providers", migrate, h.ListToolMigrationProviders)
+				agencyRoutes.GET("/:agencyId/migrations", migrate, h.ListAgencyToolMigrations)
+				agencyRoutes.POST("/:agencyId/migrations", migrate, m.IdempotencyMiddleware(), h.CreateAgencyToolMigration)
+				agencyRoutes.GET("/:agencyId/migrations/:id", migrate, middleware.UUIDParams("id"), h.GetAgencyToolMigration)
+				agencyRoutes.POST("/:agencyId/migrations/:id/start", migrate, middleware.UUIDParams("id"), m.IdempotencyMiddleware(), h.StartAgencyToolMigration)
+				agencyRoutes.POST("/:agencyId/migrations/:id/cancel", migrate, middleware.UUIDParams("id"), h.CancelAgencyToolMigration)
+				agencyRoutes.POST("/:agencyId/migrations/:id/link-senders", migrate, middleware.UUIDParams("id"), h.LinkAgencyToolMigrationSenders)
+				agencyRoutes.DELETE("/:agencyId/migrations/:id", migrate, middleware.UUIDParams("id"), h.DismissAgencyToolMigration)
 				// Inbox vendor accounts the agency holds once and uses in any client; session-only, they carry keys.
 				agencyRoutes.GET("/:agencyId/vendors", sessionOnly, h.ListAgencyVendors)
 				agencyRoutes.POST("/:agencyId/vendors", sessionOnly, middleware.RequireFreshAuth(), m.IdempotencyMiddleware(), h.CreateAgencyVendor)
@@ -2230,6 +2257,8 @@ func Run(
 		// are tightly coupled to user/org context; a dedicated bit
 		// can be carved later if mailbox-specific actions land.
 		adminRoutes.GET("/mailboxes", middleware.RequireAdminPermission(models.AdminPermViewUsers), h.AdminSearchMailboxes)
+		// A domain owner asking for every mailbox on their domains to go, across workspaces.
+		adminRoutes.POST("/mailboxes/remove", middleware.RequireAdminPermission(models.AdminPermManageOrganizations), h.AdminRemoveMailboxes)
 
 		// Campaign Management
 		adminRoutes.GET("/campaigns", middleware.RequireAdminPermission(models.AdminPermViewCampaigns), h.AdminSearchCampaigns)
@@ -2303,6 +2332,8 @@ func Run(
 		adminRoutes.GET("/fleet/release", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminFleetRelease)
 		adminRoutes.PUT("/fleet/release", middleware.RequireAdminPermission(models.AdminPermManageWorkers), h.AdminFleetSetRelease)
 		adminRoutes.GET("/fleet/capacity", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminFleetCapacity)
+		adminRoutes.GET("/fleet/scale", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminFleetScale)
+		adminRoutes.PATCH("/fleet/scale", middleware.RequireAdminPermission(models.AdminPermManageWorkers), middleware.RequireFreshAuth(), h.AdminFleetSetMax)
 		adminRoutes.GET("/fleet/decisions", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminFleetDecisions)
 		adminRoutes.GET("/fleet/dedicated", middleware.RequireAdminPermission(models.AdminPermViewWorkers), h.AdminFleetDedicated)
 		adminRoutes.POST("/fleet/dedicated/:orgId/release", middleware.RequireAdminPermission(models.AdminPermManageWorkers), h.AdminFleetReleaseIsolatedEgress)
@@ -2351,6 +2382,7 @@ func Run(
 	// Stripe webhook (no auth - uses signature verification)
 	r.POST("/webhook/stripe", h.HandleStripeWebhook)
 
+	h.Router = r
 	return r
 }
 
